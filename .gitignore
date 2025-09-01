@@ -1,0 +1,9 @@
+__pycache__/
+ai-gpu-docker/
+api/__pycache__/
+haystack-env/
+image_store/
+qdrant_data/
+uploads/
+util/__pycache__/
+models/
