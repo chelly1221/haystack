@@ -123,7 +123,7 @@ def get_query_router(document_store, embedder):
 ### 질문:
 {user_query}
 
-URL을 반드시 전부 누락없이 포함하세요.
+URL을 반드시 전부 누락없이 원문대로 표시하세요.
 <|im_end|>
 <|im_start|>assistant
 """
