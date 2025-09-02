@@ -45,6 +45,7 @@ def extract_images_from_pdf(pdf_path: str, doc_id: str) -> dict:
         
         for img_index, img in enumerate(image_list):
             saved = False
+            dst_filename = ""  # Initialize filename variable
             xref = img[0]
             
             print(f"\n🔍 Processing image {img_index + 1} on page {page_num + 1}")
@@ -86,12 +87,36 @@ def extract_images_from_pdf(pdf_path: str, doc_id: str) -> dict:
                 
                 # Generate short unique ID for the image (8 characters)
                 short_id = generate_short_id(doc_id, page_num + 1, img_counter + 1)
-                dst_filename = f"{short_id}.png"
+                
+                # Determine proper file extension based on image format
+                img_format = image.format or "PNG"  # Default to PNG if format unknown
+                ext = "png"
+                if img_format.upper() == "JPEG":
+                    ext = "jpg"
+                elif img_format.upper() == "PNG":
+                    ext = "png"
+                elif img_format.upper() == "GIF":
+                    ext = "gif"
+                elif img_format.upper() == "BMP":
+                    ext = "bmp"
+                else:
+                    ext = "png"  # Default fallback
+                
+                dst_filename = f"{short_id}.{ext}"
                 dst_path = os.path.join(image_dir, dst_filename)
                 
-                image.save(dst_path, "PNG", optimize=True)
+                # Save in original format or convert to PNG if unsupported
+                try:
+                    if img_format.upper() in ["JPEG", "PNG", "GIF", "BMP"]:
+                        image.save(dst_path, img_format, optimize=True)
+                    else:
+                        image.save(dst_path, "PNG", optimize=True)
+                except:
+                    # Fallback to PNG if original format fails
+                    image.save(dst_path, "PNG", optimize=True)
+                
                 saved = True
-                print(f"  ✅ Saved as {dst_filename}")
+                print(f"  ✅ Saved as {dst_filename} (format: {img_format})")
                 
             except Exception as e:
                 print(f"  ⚠️ Method 1 failed: {str(e)[:100]}")
@@ -141,22 +166,25 @@ def extract_images_from_pdf(pdf_path: str, doc_id: str) -> dict:
                     
                     # Generate short unique ID for the image (8 characters)
                     short_id = generate_short_id(doc_id, page_num + 1, img_counter + 1)
-                    dst_filename = f"{short_id}.png"
+                    
+                    # For Pixmap, we'll save as PNG since we don't have original format info
+                    ext = "png"
+                    dst_filename = f"{short_id}.{ext}"
                     dst_path = os.path.join(image_dir, dst_filename)
                     
                     pix.save(dst_path)
                     saved = True
-                    print(f"  ✅ Method 2 saved as {dst_filename}")
+                    print(f"  ✅ Method 2 saved as {dst_filename} (Pixmap -> PNG)")
                     
                     pix = None
                     
                 except Exception as e:
                     print(f"  ❌ Method 2 failed: {str(e)[:100]}")
             
-            # If successfully saved, add to map with short URL
+            # If successfully saved, add to map with URL including proper extension
             if saved:
-                # Create short URL: http://192.168.10.101:8001/images/해시8자리
-                image_url = f"http://192.168.10.101:8001/images/{short_id}"
+                # Create URL with proper extension: http://192.168.10.101:8001/images/{filename}
+                image_url = f"http://192.168.10.101:8001/images/{dst_filename}"
                 page_images.append((img_counter, image_url))
                 img_counter += 1
         
