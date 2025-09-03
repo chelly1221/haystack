@@ -120,9 +120,8 @@ def get_query_router(document_store, embedder):
 {context}
 
 ### 질문:
+URL이 있으면 반드시 모두 포함하세요.
 {user_query}
-
-URL이 있으면 반드시 포함하세요.
 <|im_end|>
 <|im_start|>assistant
 """
