@@ -28,8 +28,6 @@ class LlamaServerGenerator:
         
         # 기본 생성 파라미터 설정
         self.default_max_tokens = default_max_tokens
-        self.default_temperature = default_temperature
-        self.default_top_p = default_top_p
         
     async def stream(self, 
                      prompt: str,
@@ -70,9 +68,13 @@ class LlamaServerGenerator:
         # 기본값 적용
         generation_params = {
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
-            "temperature": temperature if temperature is not None else self.default_temperature,
-            "top_p": top_p if top_p is not None else self.default_top_p,
         }
+        
+        # 선택적 파라미터 추가 (값이 제공된 경우에만)
+        if temperature is not None:
+            generation_params["temperature"] = temperature
+        if top_p is not None:
+            generation_params["top_p"] = top_p
         
         # 선택적 파라미터 추가 (값이 제공된 경우에만)
         if top_k is not None:
@@ -313,9 +315,7 @@ async def stream_llama(prompt: str,
     """
     generator = LlamaServerGenerator(
         server_url,
-        default_max_tokens=max_tokens,
-        default_temperature=temperature,
-        default_top_p=top_p
+        default_max_tokens=max_tokens
     )
     async for chunk in generator.stream(prompt, 
                                        use_chat_format=use_chat_format, 
