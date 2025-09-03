@@ -290,9 +290,9 @@ class LlamaServerGenerator:
 async def stream_llama(prompt: str, 
                       server_url: str = "http://192.168.10.101:8080",
                       use_chat_format: bool = False,
-                      max_tokens: int = 2048,
+                      max_tokens: int = 4096,
                       temperature: float = 0.7,
-                      top_p: float = 0.95,
+                      top_p: float = 0.9,
                       tools: Optional[List[Dict[str, Any]]] = None,
                       tool_choice: Optional[str] = None,
                       **kwargs) -> AsyncGenerator[str, None]:
