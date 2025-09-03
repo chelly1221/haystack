@@ -11,9 +11,7 @@ class LlamaServerGenerator:
     
     def __init__(self, 
                  server_url: str = "http://192.168.10.101:8080",
-                 default_max_tokens: int = 10000,
-                 default_temperature: float = 0.1,
-                 default_top_p: float = 0.9):
+                 default_max_tokens: int = 10000):
         """
         Initialize the LlamaServerGenerator
         
