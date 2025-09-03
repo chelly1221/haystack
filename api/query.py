@@ -122,7 +122,7 @@ def get_query_router(document_store, embedder):
 ### 질문:
 {user_query}
 
-URL을 반드시 전부 누락없이 포함하세요. URL은 1번씩만 포함하세요.
+URL이 있으면 반드시 포함하세요.
 <|im_end|>
 <|im_start|>assistant
 """
