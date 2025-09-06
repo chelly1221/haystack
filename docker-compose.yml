@@ -19,7 +19,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
     command: >
-      --model /models/A.X-3.1-Light
+      --model /models/A.X-4.0-Light
       --host 0.0.0.0
       --port 8080
       --gpu-memory-utilization 0.98
