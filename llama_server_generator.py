@@ -107,7 +107,7 @@ class LlamaServerGenerator:
                 messages = prompt
                 
             payload = {
-                "model": "/models/A.X-4.0-Light",  # 모델 경로
+                "model": "/models/A.X-3.1-Light",  # 모델 경로
                 "messages": messages,
                 "stream": True,
                 **generation_params
@@ -116,7 +116,7 @@ class LlamaServerGenerator:
         else:
             # Text completion format
             payload = {
-                "model": "/models/A.X-4.0-Light",  # 모델 경로
+                "model": "/models/A.X-3.1-Light",  # 모델 경로
                 "prompt": prompt,
                 "stream": True,
                 **generation_params
