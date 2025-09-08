@@ -36,48 +36,14 @@ class BackgroundFileProcessor:
         self.is_running = True
         logging.info("🚀 Starting background file processor...")
         
-        # 두 개의 동시 작업: 파일 스캔 + 큐 처리
-        await asyncio.gather(
-            self.file_scanner(),
-            self.queue_processor()
-        )
-
-    async def file_scanner(self):
-        """파일 스캔 루프"""
+        # 단일 작업: 파일 스캔 및 직접 처리
         while self.is_running:
             try:
                 await self.scan_and_process()
                 await asyncio.sleep(self.scan_interval)
             except Exception as e:
-                logging.error(f"❌ File scanner error: {e}")
+                logging.error(f"❌ Background processor error: {e}")
                 await asyncio.sleep(self.scan_interval)
-
-    async def queue_processor(self):
-        """처리 큐 소비 루프"""
-        logging.info("🔄 Starting queue processor...")
-        
-        while self.is_running:
-            try:
-                # 큐에서 작업 가져오기 (타임아웃 설정으로 주기적 체크)
-                try:
-                    task_id = await asyncio.wait_for(
-                        task_manager.processing_queue.get(), 
-                        timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-                
-                task = task_manager.get_task(task_id)
-                
-                if not task:
-                    continue
-                
-                # 실제 처리 함수 호출
-                await self.process_file_task(task_id)
-                
-            except Exception as e:
-                logging.error(f"❌ Queue processor error: {e}")
-                await asyncio.sleep(1)
 
     async def stop(self):
         """백그라운드 프로세서 중지"""
@@ -154,15 +120,15 @@ class BackgroundFileProcessor:
             
             task_manager.update_task_status(
                 file_uuid,
-                TaskStatus.UPLOADING,
+                TaskStatus.PROCESSING,
                 progress=30,
-                message="파일 이동 완료, 처리 시작..."
+                message="파일 이동 완료, 문서 분석 시작..."
             )
             
             # 파일 경로 저장
             task_manager.set_task_file_path(file_uuid, final_file_path)
             
-            # 최종 위치에 메타데이터 저장 (기존 시스템 호환성)
+            # 최종 위치에 메타데이터 저장
             final_meta_path = final_file_path + ".meta.json"
             final_metadata = {
                 "task_id": file_uuid,
@@ -179,15 +145,8 @@ class BackgroundFileProcessor:
             with open(final_meta_path, "w", encoding="utf-8") as f:
                 json.dump(final_metadata, f, ensure_ascii=False, indent=2)
             
-            # 처리 큐에 작업 추가
-            await task_manager.processing_queue.put(file_uuid)
-            
-            task_manager.update_task_status(
-                file_uuid,
-                TaskStatus.QUEUED,
-                progress=100,
-                message="처리 대기 중..."
-            )
+            # 직접 처리 시작 (큐를 거치지 않음)
+            await self.process_file_task(file_uuid)
             
             # 처리 완료 - 메타파일과 락파일 정리
             os.remove(meta_file_path)
