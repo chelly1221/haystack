@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Form
+from fastapi import APIRouter, HTTPException, Query, Form, Response
 from typing import List, Optional
 from pydantic import BaseModel
 from haystack import Document
@@ -45,7 +45,12 @@ def check_document_access(doc_meta, sosok, site):
 
 def get_documents_router(document_store):
     @router.get("/list-documents/")
-    async def list_documents(sosok: Optional[str] = Query(None), site: Optional[str] = Query(None)):
+    async def list_documents(response: Response, sosok: Optional[str] = Query(None), site: Optional[str] = Query(None)):
+        # Add no-cache headers to prevent caching
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
         try:
             loop = asyncio.get_event_loop()
             docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
