@@ -10,9 +10,15 @@ import asyncio
 import logging
 import shutil
 import unicodedata
+import gc
+import re
+import pdfplumber
 from pathlib import Path
 from typing import Dict, List
+from decimal import Decimal
 from task_manager_sqlite import task_manager, TaskStatus
+from util.pdf import split_pdf_by_section_headings, split_pdf_by_token_window
+from util.embedding import embed_document_sections
 
 class BackgroundFileProcessor:
     def __init__(self, document_store, embedder):
@@ -172,12 +178,6 @@ class BackgroundFileProcessor:
 
     async def process_file_task(self, task_id: str):
         """실제 파일 처리 로직 (큐에서 소비된 작업 처리)"""
-        from util.pdf import split_pdf_by_section_headings, split_pdf_by_token_window
-        from util.embedding import embed_document_sections
-        from decimal import Decimal
-        import pdfplumber
-        import re
-        import gc
         
         try:
             task = task_manager.get_task(task_id)
@@ -276,7 +276,7 @@ class BackgroundFileProcessor:
                                               progress=60, message="임베딩 생성 중...")
                 
                 # 문서를 Qdrant에 저장
-                await self.store_document_sections(task_id, sections, metadata)
+                await self.store_document_sections(task_id, sections, metadata, total_pages)
             
             # 완료 처리
             task_manager.update_task_status(task_id, TaskStatus.COMPLETED,
@@ -296,23 +296,23 @@ class BackgroundFileProcessor:
             task_manager.update_task_status(task_id, TaskStatus.FAILED,
                                           message=f"처리 실패: {str(e)}")
 
-    async def store_document_sections(self, task_id: str, sections: list, metadata: dict):
+    async def store_document_sections(self, task_id: str, sections: list, metadata: dict, total_pages: int):
         """문서 섹션을 Qdrant에 저장"""
         try:
-            # 임베딩 생성 및 저장
-            embedded_docs = await embed_document_sections(
-                sections, self.embedder, self.document_store
-            )
+            # 메타데이터 베이스 준비
+            metadata_base = {
+                "task_id": task_id,
+                "sosok": metadata.get("sosok", ""),
+                "site": metadata.get("site", ""),
+                "tags": metadata.get("tags", ""),
+                "original_filename": metadata.get("original_filename", ""),
+                "upload_time": time.time()
+            }
             
-            # 추가 메타데이터 설정
-            for doc in embedded_docs:
-                doc.meta.update({
-                    "task_id": task_id,
-                    "sosok": metadata.get("sosok", ""),
-                    "site": metadata.get("site", ""),
-                    "tags": metadata.get("tags", ""),
-                    "upload_time": time.time()
-                })
+            # 임베딩 생성 (동기 함수이므로 await 제거)
+            embedded_docs = embed_document_sections(
+                sections, metadata_base, total_pages, self.embedder
+            )
             
             # Qdrant에 저장
             self.document_store.write_documents(embedded_docs)
