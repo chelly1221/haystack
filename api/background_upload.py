@@ -67,27 +67,24 @@ def get_background_upload_router(document_store, embedder):
         site = site.strip() if site else ""
         
         task_ids = []
-        file_data_list = []  # 파일 데이터를 임시 저장
+        file_metadata_list = []  # 파일 메타데이터만 저장 (파일 내용은 읽지 않음)
         
-        # 파일 검증 및 메모리로 읽기 (빠른 검증만)
+        # 파일 검증만 수행 (파일 내용은 읽지 않음)
         for file in files:
             # 파일 확장자 검증
             ext = os.path.splitext(file.filename.lower())[-1]
             if ext not in [".pdf", ".hwpx", ".docx", ".pptx"]:
                 continue
             
-            # 작업 ID 생성 (DB 작업 최소화)
+            # 작업 ID 생성
             task_id = str(uuid.uuid4())
             task_ids.append(task_id)
             
-            # 파일 데이터를 메모리로 읽기 (응답 전에 필요한 유일한 비동기 작업)
-            content = await file.read()
-            
-            # 파일 정보를 메모리에 저장 (디스크 I/O 없음)
-            file_data_list.append({
+            # 파일 메타데이터만 저장 (파일 내용은 백그라운드에서 읽음)
+            file_metadata_list.append({
                 "task_id": task_id,
                 "filename": file.filename,
-                "content": content,
+                "file_obj": file,  # 파일 객체 저장 (내용은 아직 읽지 않음)
                 "content_type": file.content_type,
                 "tags": tags,
                 "sosok": sosok,
@@ -98,11 +95,11 @@ def get_background_upload_router(document_store, embedder):
                 "overwrite_decisions": overwrite_decisions
             })
         
-        # IMMEDIATE RESPONSE - 파일 처리 전에 응답 반환
-        logging.info(f"📤 Accepting {len(task_ids)} files for background processing")
+        # IMMEDIATE RESPONSE - 파일 내용을 읽지 않고 즉시 응답
+        logging.info(f"📤 Accepting {len(task_ids)} files for background processing (no file reading)")
         
-        # 백그라운드에서 파일 처리 스케줄링 (응답 후 처리)
-        asyncio.create_task(process_uploaded_files(file_data_list, task_manager))
+        # 백그라운드에서 파일 처리 스케줄링 (응답 후 파일 읽기)
+        asyncio.create_task(process_uploaded_files_from_metadata(file_metadata_list, task_manager))
         
         # 즉시 응답 반환 - 파일 처리를 기다리지 않음
         return {
@@ -189,23 +186,34 @@ def get_background_upload_router(document_store, embedder):
     return router
 
 
-async def process_uploaded_files(file_data_list, task_manager):
-    """응답 후 백그라운드에서 업로드된 파일들을 처리"""
+async def process_uploaded_files_from_metadata(file_metadata_list, task_manager):
+    """응답 후 백그라운드에서 파일 메타데이터로부터 파일을 처리"""
     import unicodedata
     
     # 업로드 디렉토리 확인
     os.makedirs("./uploads", exist_ok=True)
     
-    for file_data in file_data_list:
-        task_id = file_data["task_id"]
-        filename = file_data["filename"]
-        content = file_data["content"]
+    for file_metadata in file_metadata_list:
+        task_id = file_metadata["task_id"]
+        filename = file_metadata["filename"]
+        file_obj = file_metadata["file_obj"]
         
         try:
             # 1. 데이터베이스에 작업 등록
-            task_manager.create_task_with_id(task_id, filename, file_data["sosok"], file_data["site"])
+            task_manager.create_task_with_id(task_id, filename, file_metadata["sosok"], file_metadata["site"])
             
-            # 2. 파일명 정규화 및 파일 저장
+            # 2. 파일 내용을 이제 읽기 (백그라운드에서)
+            task_manager.update_task_status(
+                task_id, 
+                TaskStatus.UPLOADING,
+                progress=25,
+                message="파일 읽기 중..."
+            )
+            
+            # 파일 내용 읽기 (응답 후이므로 블로킹되어도 문제없음)
+            content = await file_obj.read()
+            
+            # 3. 파일명 정규화 및 파일 저장
             normalized_filename = unicodedata.normalize("NFC", filename.strip())
             unique_filename = f"{uuid.uuid4().hex}_{normalized_filename}"
             file_path = os.path.join("./uploads", unique_filename)
@@ -230,13 +238,13 @@ async def process_uploaded_files(file_data_list, task_manager):
             metadata = {
                 "task_id": task_id,
                 "file_path": file_path,
-                "tags": file_data["tags"],
-                "sosok": file_data["sosok"],
-                "site": file_data["site"],
-                "top_margin": file_data["top_margin"],
-                "bottom_margin": file_data["bottom_margin"],
-                "margin_settings": file_data["margin_settings"],
-                "overwrite_decisions": file_data["overwrite_decisions"],
+                "tags": file_metadata["tags"],
+                "sosok": file_metadata["sosok"],
+                "site": file_metadata["site"],
+                "top_margin": file_metadata["top_margin"],
+                "bottom_margin": file_metadata["bottom_margin"],
+                "margin_settings": file_metadata["margin_settings"],
+                "overwrite_decisions": file_metadata["overwrite_decisions"],
                 "original_filename": filename
             }
             with open(meta_path, "w") as f:
@@ -266,6 +274,12 @@ async def process_uploaded_files(file_data_list, task_manager):
             except:
                 # 작업이 아직 생성되지 않은 경우 무시
                 pass
+
+
+# Keep old function for backward compatibility
+async def process_uploaded_files(file_data_list, task_manager):
+    """Legacy function - kept for backward compatibility"""
+    pass
 
 
 async def process_file_task(task_id: str, document_store, embedder):
