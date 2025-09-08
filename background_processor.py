@@ -28,6 +28,7 @@ class BackgroundFileProcessor:
         self.final_dir = "./uploads"
         self.processed_dir = os.path.join(self.temp_dir, "processed")
         self.scan_interval = 2  # 2초마다 스캔
+        self.processing_workers = 3  # 동시 처리 워커 수
         self.is_running = False
         
         # 디렉토리 생성
@@ -38,18 +39,54 @@ class BackgroundFileProcessor:
         logging.info("🎯 Background File Processor initialized")
 
     async def start(self):
-        """백그라운드 프로세서 시작"""
+        """백그라운드 프로세서 시작 - 파일 스캔과 처리를 분리"""
         self.is_running = True
         logging.info("🚀 Starting background file processor...")
         
-        # 단일 작업: 파일 스캔 및 직접 처리
+        # 독립적인 서비스들: 파일 스캔 + 다중 큐 처리 워커 (진정한 분리)
+        workers = [
+            self.file_scanner(),
+            *[self.queue_processor(worker_id=i) for i in range(self.processing_workers)]
+        ]
+        await asyncio.gather(*workers)
+
+    async def file_scanner(self):
+        """파일 스캔 전용 - 가벼운 작업만"""
+        logging.info("📁 Starting file scanner...")
         while self.is_running:
             try:
                 await self.scan_and_process()
                 await asyncio.sleep(self.scan_interval)
             except Exception as e:
-                logging.error(f"❌ Background processor error: {e}")
+                logging.error(f"❌ File scanner error: {e}")
                 await asyncio.sleep(self.scan_interval)
+
+    async def queue_processor(self, worker_id: int = 0):
+        """처리 큐 전용 - 무거운 작업 담당"""
+        logging.info(f"⚙️ Starting queue processor worker #{worker_id}...")
+        while self.is_running:
+            try:
+                # 큐에서 작업 가져오기 (타임아웃으로 주기적 체크)
+                try:
+                    task_id = await asyncio.wait_for(
+                        task_manager.processing_queue.get(), 
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                
+                task = task_manager.get_task(task_id)
+                if not task:
+                    continue
+                
+                # 무거운 처리 작업 수행
+                logging.info(f"🔄 Worker #{worker_id} processing task: {task_id}")
+                await self.process_file_task(task_id)
+                logging.info(f"✅ Worker #{worker_id} completed task: {task_id}")
+                
+            except Exception as e:
+                logging.error(f"❌ Queue processor worker #{worker_id} error: {e}")
+                await asyncio.sleep(1)
 
     async def stop(self):
         """백그라운드 프로세서 중지"""
@@ -126,9 +163,9 @@ class BackgroundFileProcessor:
             
             task_manager.update_task_status(
                 file_uuid,
-                TaskStatus.PROCESSING,
+                TaskStatus.UPLOADING,
                 progress=30,
-                message="파일 이동 완료, 문서 분석 시작..."
+                message="파일 이동 완료, 큐에 추가..."
             )
             
             # 파일 경로 저장
@@ -151,8 +188,15 @@ class BackgroundFileProcessor:
             with open(final_meta_path, "w", encoding="utf-8") as f:
                 json.dump(final_metadata, f, ensure_ascii=False, indent=2)
             
-            # 직접 처리 시작 (큐를 거치지 않음)
-            await self.process_file_task(file_uuid)
+            # 처리 큐에 추가 (분리된 processor가 처리)
+            await task_manager.processing_queue.put(file_uuid)
+            
+            task_manager.update_task_status(
+                file_uuid,
+                TaskStatus.QUEUED,
+                progress=100,
+                message="처리 대기 중..."
+            )
             
             # 처리 완료 - 메타파일과 락파일 정리
             os.remove(meta_file_path)
