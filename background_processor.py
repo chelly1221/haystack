@@ -36,13 +36,48 @@ class BackgroundFileProcessor:
         self.is_running = True
         logging.info("🚀 Starting background file processor...")
         
+        # 두 개의 동시 작업: 파일 스캔 + 큐 처리
+        await asyncio.gather(
+            self.file_scanner(),
+            self.queue_processor()
+        )
+
+    async def file_scanner(self):
+        """파일 스캔 루프"""
         while self.is_running:
             try:
                 await self.scan_and_process()
                 await asyncio.sleep(self.scan_interval)
             except Exception as e:
-                logging.error(f"❌ Background processor error: {e}")
+                logging.error(f"❌ File scanner error: {e}")
                 await asyncio.sleep(self.scan_interval)
+
+    async def queue_processor(self):
+        """처리 큐 소비 루프"""
+        logging.info("🔄 Starting queue processor...")
+        
+        while self.is_running:
+            try:
+                # 큐에서 작업 가져오기 (타임아웃 설정으로 주기적 체크)
+                try:
+                    task_id = await asyncio.wait_for(
+                        task_manager.processing_queue.get(), 
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                
+                task = task_manager.get_task(task_id)
+                
+                if not task:
+                    continue
+                
+                # 실제 처리 함수 호출
+                await self.process_file_task(task_id)
+                
+            except Exception as e:
+                logging.error(f"❌ Queue processor error: {e}")
+                await asyncio.sleep(1)
 
     async def stop(self):
         """백그라운드 프로세서 중지"""
@@ -175,6 +210,159 @@ class BackgroundFileProcessor:
             # 락 파일 정리
             if os.path.exists(lock_file):
                 os.remove(lock_file)
+
+    async def process_file_task(self, task_id: str):
+        """실제 파일 처리 로직 (큐에서 소비된 작업 처리)"""
+        from util.pdf import split_pdf_by_section_headings, split_pdf_by_token_window
+        from util.embedding import embed_document_sections
+        from decimal import Decimal
+        import pdfplumber
+        import re
+        import gc
+        
+        try:
+            task = task_manager.get_task(task_id)
+            if not task:
+                return
+            
+            # 상태를 처리 중으로 변경
+            task_manager.update_task_status(task_id, TaskStatus.PROCESSING, 
+                                          progress=10, message="파일 분석 중...")
+            
+            # 파일 경로 가져오기
+            file_path = task_manager.get_task_file_path(task_id)
+            
+            if not file_path or not os.path.exists(file_path):
+                raise Exception("파일을 찾을 수 없습니다")
+            
+            # 메타데이터 로드
+            meta_path = file_path + ".meta.json"
+            if not os.path.exists(meta_path):
+                raise Exception("메타데이터 파일을 찾을 수 없습니다")
+                
+            with open(meta_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            
+            ext = os.path.splitext(file_path.lower())[-1]
+            sections = []
+            total_pages = 0
+            
+            # 파일 처리
+            if ext == ".pdf":
+                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                                              progress=20, message="PDF 분석 중...")
+                
+                # 유지보수 문서 확인
+                def detect_maintenance_doc(path):
+                    try:
+                        with pdfplumber.open(path) as pdf:
+                            for page in pdf.pages[:3]:  # 처음 3페이지만 확인
+                                text = page.extract_text()
+                                if text:
+                                    first_line = text.strip().splitlines()[0] if text.strip().splitlines() else ""
+                                    cleaned = re.sub(r"\s+", "", first_line)
+                                    return cleaned.startswith("유지보수교범")
+                    except Exception as e:
+                        logging.warning(f"⚠️ Error detecting maintenance doc: {e}")
+                    return False
+                
+                is_maintenance = detect_maintenance_doc(file_path)
+                
+                # 마진 설정
+                margin_map = {}
+                if metadata.get("margin_settings"):
+                    try:
+                        margin_map = json.loads(metadata["margin_settings"])
+                    except:
+                        pass
+                
+                file_margins = margin_map.get(metadata["original_filename"], {})
+                top_margin = Decimal(str(file_margins.get("top_margin", metadata.get("top_margin", 0.1))))
+                bottom_margin = Decimal(str(file_margins.get("bottom_margin", metadata.get("bottom_margin", 0.1))))
+                
+                # PDF 분할 처리
+                try:
+                    if is_maintenance:
+                        sections = split_pdf_by_section_headings(
+                            file_path, None, top_margin, bottom_margin,
+                            doc_id=None, extract_text_tables=True,
+                            auto_detect_header_footer=True,
+                            document_title=metadata["original_filename"]
+                        )
+                    else:
+                        sections = split_pdf_by_token_window(
+                            file_path, top_margin, bottom_margin,
+                            doc_id=None, window_size=2048,
+                            document_title=metadata["original_filename"]
+                        )
+                    
+                    total_pages = len(sections) if sections else 0
+                    
+                except Exception as e:
+                    logging.error(f"❌ PDF processing error: {e}")
+                    raise Exception(f"PDF 처리 실패: {str(e)}")
+            
+            elif ext in [".docx", ".pptx", ".hwpx"]:
+                # 기타 문서 형식 처리
+                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                                              progress=30, message=f"{ext.upper()} 처리 중...")
+                
+                # TODO: DOCX, PPTX, HWPX 처리 로직 추가
+                sections = []  # 임시
+                total_pages = 1  # 임시
+            
+            # 임베딩 처리
+            if sections:
+                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                                              progress=60, message="임베딩 생성 중...")
+                
+                # 문서를 Qdrant에 저장
+                await self.store_document_sections(task_id, sections, metadata)
+            
+            # 완료 처리
+            task_manager.update_task_status(task_id, TaskStatus.COMPLETED,
+                                          progress=100, message="처리 완료")
+            
+            # 메타데이터 파일 정리
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+            
+            logging.info(f"✅ Task completed: {task_id}")
+            
+            # 메모리 정리
+            gc.collect()
+            
+        except Exception as e:
+            logging.error(f"❌ Task processing failed for {task_id}: {e}")
+            task_manager.update_task_status(task_id, TaskStatus.FAILED,
+                                          message=f"처리 실패: {str(e)}")
+
+    async def store_document_sections(self, task_id: str, sections: list, metadata: dict):
+        """문서 섹션을 Qdrant에 저장"""
+        try:
+            # 임베딩 생성 및 저장
+            embedded_docs = await embed_document_sections(
+                sections, self.embedder, self.document_store
+            )
+            
+            # 추가 메타데이터 설정
+            for doc in embedded_docs:
+                doc.meta.update({
+                    "task_id": task_id,
+                    "sosok": metadata.get("sosok", ""),
+                    "site": metadata.get("site", ""),
+                    "tags": metadata.get("tags", ""),
+                    "upload_time": time.time()
+                })
+            
+            # Qdrant에 저장
+            self.document_store.write_documents(embedded_docs)
+            
+            logging.info(f"📚 Stored {len(embedded_docs)} document sections for task {task_id}")
+            
+        except Exception as e:
+            logging.error(f"❌ Failed to store document sections for {task_id}: {e}")
+            raise
 
 
 
