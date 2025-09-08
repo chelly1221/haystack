@@ -11,43 +11,6 @@ from task_manager_sqlite import task_manager
 def get_background_upload_router(document_store, embedder):
     router = APIRouter()
     
-    # 백그라운드 워커 시작
-    async def start_background_worker():
-        """백그라운드 작업 처리 워커"""
-        while True:
-            try:
-                # 큐에서 작업 가져오기 (타임아웃 설정으로 주기적 체크)
-                try:
-                    task_id = await asyncio.wait_for(
-                        task_manager.processing_queue.get(), 
-                        timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-                
-                task = task_manager.get_task(task_id)
-                
-                if not task:
-                    continue
-                
-                # 실제 처리 함수 호출
-                await process_file_task(task_id, document_store, embedder)
-                
-            except Exception as e:
-                logging.error(f"❌ Background worker error: {e}")
-                await asyncio.sleep(1)
-    
-    # 애플리케이션 시작 시 워커 실행
-    asyncio.create_task(start_background_worker())
-    
-    # 주기적인 정리 작업
-    async def cleanup_worker():
-        while True:
-            await asyncio.sleep(3600)  # 1시간마다
-            task_manager.cleanup_old_tasks()
-    
-    asyncio.create_task(cleanup_worker())
-    
     @router.post("/upload-async/")
     async def upload_async(
         files: List[UploadFile] = File(...),
