@@ -41,12 +41,12 @@ def get_background_upload_router(document_store, embedder):
             if ext not in [".pdf", ".hwpx", ".docx", ".pptx"]:
                 continue
             
-            # UUID 생성
-            file_uuid = str(uuid.uuid4())
+            # 파일 ID 생성
+            file_id = str(uuid.uuid4())
             
             # 파일명 정규화
             normalized_filename = unicodedata.normalize("NFC", file.filename.strip())
-            temp_filename = f"{file_uuid}_{normalized_filename}"
+            temp_filename = f"{file_id}_{normalized_filename}"
             temp_file_path = os.path.join(temp_dir, temp_filename)
             meta_file_path = temp_file_path + ".meta"
             
@@ -57,7 +57,7 @@ def get_background_upload_router(document_store, embedder):
             
             # 메타데이터 저장
             metadata = {
-                "uuid": file_uuid,
+                "uuid": file_id,
                 "original_filename": file.filename,
                 "content_type": file.content_type,
                 "tags": tags,
@@ -74,7 +74,7 @@ def get_background_upload_router(document_store, embedder):
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
             
             uploaded_files.append({
-                "uuid": file_uuid,
+                "file_id": file_id,
                 "filename": file.filename,
                 "size": len(content)
             })

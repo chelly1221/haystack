@@ -132,13 +132,13 @@ class BackgroundFileProcessor:
             with open(meta_file_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
             
-            file_uuid = metadata["uuid"]
+            file_id = metadata["uuid"]
             original_filename = metadata["original_filename"]
-            logging.info(f"🔄 Processing file: {original_filename} (UUID: {file_uuid})")
+            logging.info(f"🔄 Processing file: {original_filename} (file_id: {file_id})")
             
             # 데이터베이스에 작업 생성
             task_manager.create_task_with_id(
-                file_uuid, 
+                file_id, 
                 original_filename,
                 metadata["sosok"],
                 metadata["site"]
@@ -146,7 +146,7 @@ class BackgroundFileProcessor:
             
             # 작업 상태 업데이트
             task_manager.update_task_status(
-                file_uuid,
+                file_id,
                 TaskStatus.UPLOADING,
                 progress=10,
                 message="파일 처리 시작..."
@@ -154,7 +154,7 @@ class BackgroundFileProcessor:
             
             # 최종 파일 경로 생성
             normalized_filename = unicodedata.normalize("NFC", original_filename.strip())
-            unique_filename = f"{file_uuid}_{normalized_filename}"
+            unique_filename = f"{file_id}_{normalized_filename}"
             final_file_path = os.path.join(self.final_dir, unique_filename)
             
             # 파일 이동
@@ -162,19 +162,19 @@ class BackgroundFileProcessor:
             logging.info(f"📁 Moved file to: {final_file_path}")
             
             task_manager.update_task_status(
-                file_uuid,
+                file_id,
                 TaskStatus.UPLOADING,
                 progress=30,
                 message="파일 이동 완료, 큐에 추가..."
             )
             
             # 파일 경로 저장
-            task_manager.set_task_file_path(file_uuid, final_file_path)
+            task_manager.set_task_file_path(file_id, final_file_path)
             
             # 최종 위치에 메타데이터 저장
             final_meta_path = final_file_path + ".meta.json"
             final_metadata = {
-                "task_id": file_uuid,
+                "file_id": file_id,
                 "file_path": final_file_path,
                 "tags": metadata["tags"],
                 "sosok": metadata["sosok"],
@@ -189,10 +189,10 @@ class BackgroundFileProcessor:
                 json.dump(final_metadata, f, ensure_ascii=False, indent=2)
             
             # 처리 큐에 추가 (분리된 processor가 처리)
-            await task_manager.processing_queue.put(file_uuid)
+            await task_manager.processing_queue.put(file_id)
             
             task_manager.update_task_status(
-                file_uuid,
+                file_id,
                 TaskStatus.QUEUED,
                 progress=100,
                 message="처리 대기 중..."
@@ -209,9 +209,9 @@ class BackgroundFileProcessor:
             logging.error(f"❌ Error processing file {file_path}: {e}")
             
             # 에러 발생 시 작업 상태 업데이트
-            if 'file_uuid' in locals():
+            if 'file_id' in locals():
                 task_manager.update_task_status(
-                    file_uuid,
+                    file_id,
                     TaskStatus.FAILED,
                     message=f"처리 실패: {str(e)}"
                 )
@@ -220,20 +220,20 @@ class BackgroundFileProcessor:
             if os.path.exists(lock_file):
                 os.remove(lock_file)
 
-    async def process_file_task(self, task_id: str):
+    async def process_file_task(self, file_id: str):
         """실제 파일 처리 로직 (큐에서 소비된 작업 처리)"""
         
         try:
-            task = task_manager.get_task(task_id)
+            task = task_manager.get_task(file_id)
             if not task:
                 return
             
             # 상태를 처리 중으로 변경
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING, 
+            task_manager.update_task_status(file_id, TaskStatus.PROCESSING, 
                                           progress=10, message="파일 분석 중...")
             
             # 파일 경로 가져오기
-            file_path = task_manager.get_task_file_path(task_id)
+            file_path = task_manager.get_task_file_path(file_id)
             
             if not file_path or not os.path.exists(file_path):
                 raise Exception("파일을 찾을 수 없습니다")
@@ -252,7 +252,7 @@ class BackgroundFileProcessor:
             
             # 파일 처리
             if ext == ".pdf":
-                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                task_manager.update_task_status(file_id, TaskStatus.PROCESSING,
                                               progress=20, message="PDF 분석 중...")
                 
                 # 유지보수 문서 확인
@@ -307,7 +307,7 @@ class BackgroundFileProcessor:
             
             elif ext in [".docx", ".pptx", ".hwpx"]:
                 # 기타 문서 형식 처리
-                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                task_manager.update_task_status(file_id, TaskStatus.PROCESSING,
                                               progress=30, message=f"{ext.upper()} 처리 중...")
                 
                 # TODO: DOCX, PPTX, HWPX 처리 로직 추가
@@ -316,36 +316,36 @@ class BackgroundFileProcessor:
             
             # 임베딩 처리
             if sections:
-                task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
+                task_manager.update_task_status(file_id, TaskStatus.PROCESSING,
                                               progress=60, message="임베딩 생성 중...")
                 
                 # 문서를 Qdrant에 저장
-                await self.store_document_sections(task_id, sections, metadata, total_pages)
+                await self.store_document_sections(file_id, sections, metadata, total_pages)
             
             # 완료 처리
-            task_manager.update_task_status(task_id, TaskStatus.COMPLETED,
+            task_manager.update_task_status(file_id, TaskStatus.COMPLETED,
                                           progress=100, message="처리 완료")
             
             # 메타데이터 파일 정리
             if os.path.exists(meta_path):
                 os.remove(meta_path)
             
-            logging.info(f"✅ Task completed: {task_id}")
+            logging.info(f"✅ Task completed: {file_id}")
             
             # 메모리 정리
             gc.collect()
             
         except Exception as e:
-            logging.error(f"❌ Task processing failed for {task_id}: {e}")
-            task_manager.update_task_status(task_id, TaskStatus.FAILED,
+            logging.error(f"❌ Task processing failed for {file_id}: {e}")
+            task_manager.update_task_status(file_id, TaskStatus.FAILED,
                                           message=f"처리 실패: {str(e)}")
 
-    async def store_document_sections(self, task_id: str, sections: list, metadata: dict, total_pages: int):
+    async def store_document_sections(self, file_id: str, sections: list, metadata: dict, total_pages: int):
         """문서 섹션을 Qdrant에 저장"""
         try:
             # 메타데이터 베이스 준비
             metadata_base = {
-                "task_id": task_id,
+                "file_id": file_id,
                 "sosok": metadata.get("sosok", ""),
                 "site": metadata.get("site", ""),
                 "tags": metadata.get("tags", ""),
@@ -361,10 +361,10 @@ class BackgroundFileProcessor:
             # Qdrant에 저장
             self.document_store.write_documents(embedded_docs)
             
-            logging.info(f"📚 Stored {len(embedded_docs)} document sections for task {task_id}")
+            logging.info(f"📚 Stored {len(embedded_docs)} document sections for file {file_id}")
             
         except Exception as e:
-            logging.error(f"❌ Failed to store document sections for {task_id}: {e}")
+            logging.error(f"❌ Failed to store document sections for {file_id}: {e}")
             raise
 
 
