@@ -68,3 +68,12 @@ app.include_router(get_documents_router(document_store))
 app.include_router(get_statistics_router(document_store))
 app.include_router(get_background_upload_router(document_store, embedder))
 app.include_router(websocket_router)
+
+# Initialize background file processor
+from background_processor import start_background_processor
+
+@app.on_event("startup")
+async def startup_event():
+    """애플리케이션 시작 시 백그라운드 프로세서 시작"""
+    await start_background_processor(document_store, embedder)
+    logging.info("🚀 Application startup complete - background processor running")

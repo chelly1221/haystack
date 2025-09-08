@@ -1,13 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import List, Optional
 import os
-import shutil
 import uuid
 import unicodedata
 import logging
 import json
-import asyncio
-from task_manager_sqlite import task_manager, TaskStatus
+import time
+from task_manager_sqlite import task_manager
 
 def get_background_upload_router(document_store, embedder):
     router = APIRouter()
@@ -61,45 +60,42 @@ def get_background_upload_router(document_store, embedder):
         margin_settings: Optional[str] = Form(None),
         overwrite_decisions: Optional[str] = Form(None)
     ):
-        """비동기 파일 업로드 - 즉시 응답 반환, 파일 처리는 백그라운드"""
+        """파일 업로드만 처리 - 즉시 응답, 처리는 백그라운드 서비스가 담당"""
         
         sosok = sosok.strip() if sosok else ""
         site = site.strip() if site else ""
         
-        task_ids = []
-        temp_file_list = []  # 임시 저장된 파일 정보
+        uploaded_files = []
         
         # 임시 디렉토리 확인 및 생성
         temp_dir = "./uploads/temp"
         os.makedirs(temp_dir, exist_ok=True)
-        os.makedirs("./uploads", exist_ok=True)
         
-        # Stage 1: 파일을 임시 디렉토리에 즉시 저장
+        # 파일 저장만 수행 - 처리 로직 없음
         for file in files:
             # 파일 확장자 검증
             ext = os.path.splitext(file.filename.lower())[-1]
             if ext not in [".pdf", ".hwpx", ".docx", ".pptx"]:
                 continue
             
-            # 작업 ID 생성
-            task_id = str(uuid.uuid4())
-            task_ids.append(task_id)
+            # UUID 생성
+            file_uuid = str(uuid.uuid4())
             
             # 파일명 정규화
             normalized_filename = unicodedata.normalize("NFC", file.filename.strip())
-            temp_filename = f"{task_id}_{normalized_filename}"
+            temp_filename = f"{file_uuid}_{normalized_filename}"
             temp_file_path = os.path.join(temp_dir, temp_filename)
+            meta_file_path = temp_file_path + ".meta"
             
-            # 파일을 임시 디렉토리에 즉시 저장
+            # 파일 저장
             content = await file.read()
             with open(temp_file_path, "wb") as f:
                 f.write(content)
             
-            # 임시 파일 정보 저장
-            temp_file_list.append({
-                "task_id": task_id,
-                "filename": file.filename,
-                "temp_file_path": temp_file_path,
+            # 메타데이터 저장
+            metadata = {
+                "uuid": file_uuid,
+                "original_filename": file.filename,
                 "content_type": file.content_type,
                 "tags": tags,
                 "sosok": sosok,
@@ -107,22 +103,28 @@ def get_background_upload_router(document_store, embedder):
                 "top_margin": top_margin,
                 "bottom_margin": bottom_margin,
                 "margin_settings": margin_settings,
-                "overwrite_decisions": overwrite_decisions
+                "overwrite_decisions": overwrite_decisions,
+                "upload_timestamp": time.time()
+            }
+            
+            with open(meta_file_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            
+            uploaded_files.append({
+                "uuid": file_uuid,
+                "filename": file.filename,
+                "size": len(content)
             })
             
-            logging.info(f"📁 Saved temp file: {temp_file_path}")
+            logging.info(f"📁 File uploaded: {temp_filename}")
         
-        # IMMEDIATE RESPONSE - 파일이 안전하게 저장된 후 즉시 응답
-        logging.info(f"📤 Saved {len(task_ids)} files to temp, responding immediately")
+        logging.info(f"📤 Uploaded {len(uploaded_files)} files, responding immediately")
         
-        # Stage 2: 백그라운드에서 임시 파일로부터 처리
-        asyncio.create_task(process_files_from_temp(temp_file_list, task_manager))
-        
-        # 즉시 응답 반환 - 파일 처리를 기다리지 않음
+        # 즉시 응답 반환 - 백그라운드 프로세서가 처리 담당
         return {
-            "status": "accepted",
-            "task_ids": task_ids,
-            "message": f"{len(task_ids)}개 파일이 접수되었습니다. 처리가 시작됩니다..."
+            "status": "uploaded",
+            "files": uploaded_files,
+            "message": f"{len(uploaded_files)}개 파일이 업로드되었습니다."
         }
     
     @router.get("/tasks/")
@@ -201,358 +203,3 @@ def get_background_upload_router(document_store, embedder):
             raise HTTPException(status_code=400, detail="Cannot cancel this task")
     
     return router
-
-
-async def process_files_from_temp(temp_file_list, task_manager):
-    """Stage 2: 임시 파일들로부터 백그라운드 처리"""
-    import unicodedata
-    
-    for temp_file_info in temp_file_list:
-        task_id = temp_file_info["task_id"]
-        filename = temp_file_info["filename"]
-        temp_file_path = temp_file_info["temp_file_path"]
-        
-        try:
-            # 1. 데이터베이스에 작업 등록
-            task_manager.create_task_with_id(task_id, filename, temp_file_info["sosok"], temp_file_info["site"])
-            
-            # 2. 임시 파일 검증
-            if not os.path.exists(temp_file_path):
-                raise Exception(f"임시 파일을 찾을 수 없습니다: {temp_file_path}")
-            
-            task_manager.update_task_status(
-                task_id, 
-                TaskStatus.UPLOADING,
-                progress=25,
-                message="임시 파일 처리 중..."
-            )
-            
-            # 3. 최종 파일 경로 생성
-            normalized_filename = unicodedata.normalize("NFC", filename.strip())
-            unique_filename = f"{uuid.uuid4().hex}_{normalized_filename}"
-            final_file_path = os.path.join("./uploads", unique_filename)
-            
-            # 4. 임시 파일을 최종 위치로 이동
-            task_manager.update_task_status(
-                task_id, 
-                TaskStatus.UPLOADING,
-                progress=50,
-                message="파일 이동 중..."
-            )
-            
-            shutil.move(temp_file_path, final_file_path)
-            
-            # 5. 파일 경로 저장
-            task_manager.set_task_file_path(task_id, final_file_path)
-            
-            # 6. 메타데이터 파일 생성
-            meta_path = final_file_path + ".meta.json"
-            metadata = {
-                "task_id": task_id,
-                "file_path": final_file_path,
-                "tags": temp_file_info["tags"],
-                "sosok": temp_file_info["sosok"],
-                "site": temp_file_info["site"],
-                "top_margin": temp_file_info["top_margin"],
-                "bottom_margin": temp_file_info["bottom_margin"],
-                "margin_settings": temp_file_info["margin_settings"],
-                "overwrite_decisions": temp_file_info["overwrite_decisions"],
-                "original_filename": filename
-            }
-            with open(meta_path, "w") as f:
-                json.dump(metadata, f)
-            
-            # 7. 처리 대기 상태로 변경
-            task_manager.update_task_status(
-                task_id, 
-                TaskStatus.QUEUED,
-                progress=100,
-                message="처리 대기 중..."
-            )
-            
-            # 8. 처리 큐에 추가
-            await task_manager.processing_queue.put(task_id)
-            
-            logging.info(f"✅ File moved from temp and queued for processing: {filename} (task_id: {task_id})")
-            
-        except Exception as e:
-            logging.error(f"❌ Background processing error for {filename}: {e}")
-            # 실패한 작업 처리
-            try:
-                task_manager.fail_task(task_id, str(e))
-            except:
-                pass
-            
-            # 실패 시 임시 파일 정리
-            try:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-                    logging.info(f"🗑️ Cleaned up failed temp file: {temp_file_path}")
-            except Exception as cleanup_error:
-                logging.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {cleanup_error}")
-
-
-# Legacy functions kept for backward compatibility
-async def process_uploaded_files_from_metadata(file_metadata_list, task_manager):
-    """Legacy function - kept for backward compatibility"""
-    pass
-
-async def process_uploaded_files(file_data_list, task_manager):
-    """Legacy function - kept for backward compatibility"""
-    pass
-
-
-async def process_file_task(task_id: str, document_store, embedder):
-    """실제 파일 처리 로직"""
-    from util.pdf import split_pdf_by_section_headings, split_pdf_by_token_window
-    from util.embedding import embed_document_sections
-    from decimal import Decimal
-    import pdfplumber
-    import re
-    import gc
-    
-    try:
-        task = task_manager.get_task(task_id)
-        if not task:
-            return
-        
-        # 상태를 처리 중으로 변경
-        task_manager.update_task_status(task_id, TaskStatus.PROCESSING, 
-                                      progress=10, message="파일 분석 중...")
-        
-        # 파일 경로 가져오기
-        file_path = task_manager.get_task_file_path(task_id)
-        
-        if not file_path or not os.path.exists(file_path):
-            raise Exception("파일을 찾을 수 없습니다")
-        
-        # 메타데이터 로드
-        meta_path = file_path + ".meta.json"
-        if not os.path.exists(meta_path):
-            raise Exception("메타데이터 파일을 찾을 수 없습니다")
-            
-        with open(meta_path, "r") as f:
-            metadata = json.load(f)
-        
-        ext = os.path.splitext(file_path.lower())[-1]
-        sections = []
-        total_pages = 0
-        
-        # 파일 처리
-        if ext == ".pdf":
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                          progress=20, message="PDF 분석 중...")
-            
-            # 유지보수 문서 확인
-            def detect_maintenance_doc(path):
-                try:
-                    with pdfplumber.open(path) as pdf:
-                        for page in pdf.pages[:3]:  # 처음 3페이지만 확인
-                            text = page.extract_text()
-                            if text:
-                                first_line = text.strip().splitlines()[0] if text.strip().splitlines() else ""
-                                cleaned = re.sub(r"\s+", "", first_line)
-                                return cleaned.startswith("유지보수교범")
-                except Exception as e:
-                    logging.warning(f"⚠️ Error detecting maintenance doc: {e}")
-                return False
-            
-            is_maintenance = detect_maintenance_doc(file_path)
-            
-            # 마진 설정
-            margin_map = {}
-            if metadata.get("margin_settings"):
-                try:
-                    margin_map = json.loads(metadata["margin_settings"])
-                except:
-                    pass
-            
-            file_margins = margin_map.get(metadata["original_filename"], {})
-            top_margin = Decimal(str(file_margins.get("top_margin", metadata.get("top_margin", 0.1))))
-            bottom_margin = Decimal(str(file_margins.get("bottom_margin", metadata.get("bottom_margin", 0.1))))
-            
-            # PDF 분할
-            try:
-                if is_maintenance:
-                    sections = split_pdf_by_section_headings(
-                        file_path, None, top_margin, bottom_margin,
-                        doc_id=None, extract_text_tables=True,
-                        auto_detect_header_footer=True,
-                        document_title=metadata["original_filename"]
-                    )
-                else:
-                    sections = split_pdf_by_token_window(
-                        file_path, top_margin, bottom_margin,
-                        700, 100, "./models/KURE-v1",
-                        None, True, True
-                    )
-            except Exception as e:
-                logging.error(f"❌ PDF 처리 중 오류: {e}")
-                raise Exception(f"PDF 처리 실패: {str(e)}")
-            
-            # 총 페이지 수
-            with pdfplumber.open(file_path) as pdf:
-                total_pages = len(pdf.pages)
-            
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                          total_pages=total_pages)
-        
-        elif ext == ".hwpx":
-            from util.hwpx import split_hwpx_by_pages
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                          progress=20, message="HWPX 분석 중...")
-            try:
-                sections = split_hwpx_by_pages(file_path, os.path.basename(file_path))
-                total_pages = max([s.get("page_number", 0) for s in sections]) if sections else 1
-            except Exception as e:
-                logging.error(f"❌ HWPX 처리 중 오류: {e}")
-                raise Exception(f"HWPX 처리 실패: {str(e)}")
-        
-        elif ext == ".docx":
-            from util.docx import split_docx_by_token_window
-            from transformers import AutoTokenizer
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                          progress=20, message="DOCX 분석 중...")
-            try:
-                tokenizer = AutoTokenizer.from_pretrained("./models/KURE-v1")
-                sections = split_docx_by_token_window(file_path, 700, 100, tokenizer)
-                total_pages = len(sections)
-            except Exception as e:
-                logging.error(f"❌ DOCX 처리 중 오류: {e}")
-                raise Exception(f"DOCX 처리 실패: {str(e)}")
-        
-        elif ext == ".pptx":
-            from util.pptx import split_pptx_by_token_window
-            from transformers import AutoTokenizer
-            task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                          progress=20, message="PPTX 분석 중...")
-            try:
-                tokenizer = AutoTokenizer.from_pretrained("./models/KURE-v1")
-                sections = split_pptx_by_token_window(file_path, 700, 100, tokenizer)
-                total_pages = len(sections)
-            except Exception as e:
-                logging.error(f"❌ PPTX 처리 중 오류: {e}")
-                raise Exception(f"PPTX 처리 실패: {str(e)}")
-        
-        if not sections:
-            raise Exception("문서에서 추출된 내용이 없습니다")
-        
-        # 임베딩 처리
-        task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                      progress=50, message="텍스트 임베딩 중...")
-        
-        metadata_base = {
-            "original_filename": metadata["original_filename"],
-            "tags": metadata.get("tags", ""),
-            "sosok": metadata["sosok"],
-            "site": metadata["site"],
-            "file_id": os.path.basename(file_path),
-            "total_pdf_pages": total_pages
-        }
-        
-        # 진행률 업데이트를 위한 콜백
-        processed_count = 0
-        def update_progress():
-            nonlocal processed_count
-            processed_count += 1
-            progress = 50 + int((processed_count / len(sections)) * 40)
-            task_manager.update_task_status(
-                task_id, TaskStatus.PROCESSING,
-                progress=progress,
-                processed_pages=processed_count,
-                message=f"임베딩 중... ({processed_count}/{len(sections)})"
-            )
-        
-        # 섹션별로 임베딩 (진행률 업데이트 포함)
-        embedded_docs = []
-        for section in sections:
-            if len(section.get("content", "").strip()) < 1:
-                continue
-            
-            meta = {
-                **metadata_base,
-                "section_title": section.get("title", ""),
-                "section_id": section.get("section_id", f"{len(embedded_docs) + 1}"),
-                "section_number": len(embedded_docs) + 1,
-                "page_number": section.get("page_number", section.get("start_page", 1)),
-                "total_pdf_pages": total_pages
-            }
-            
-            from haystack import Document
-            content_with_header = f"문서: {metadata['original_filename']}\n<h2>{section.get('title', '')}</h2>\n{section['content']}"
-            doc = Document(content=content_with_header, meta=meta)
-            
-            try:
-                embedded_section = embedder.run([doc])["documents"]
-                embedded_docs.extend(embedded_section)
-            except Exception as e:
-                logging.warning(f"⚠️ 임베딩 실패 (섹션 {len(embedded_docs) + 1}): {e}")
-                continue
-            
-            update_progress()
-            
-            # 메모리 관리
-            if len(embedded_docs) % 50 == 0:
-                gc.collect()
-        
-        # 문서 저장
-        task_manager.update_task_status(task_id, TaskStatus.PROCESSING,
-                                      progress=90, message="데이터베이스 저장 중...")
-        
-        valid_docs = [doc for doc in embedded_docs if doc.embedding is not None and len(doc.embedding) > 0]
-        if valid_docs:
-            try:
-                # 배치로 저장 (메모리 효율성)
-                batch_size = 100
-                for i in range(0, len(valid_docs), batch_size):
-                    batch = valid_docs[i:i+batch_size]
-                    document_store.write_documents(batch)
-                    await asyncio.sleep(0.1)  # 다른 작업에 CPU 양보
-            except Exception as e:
-                logging.error(f"❌ 문서 저장 실패: {e}")
-                raise Exception(f"데이터베이스 저장 실패: {str(e)}")
-        else:
-            raise Exception("유효한 임베딩 문서가 없습니다")
-        
-        # 임시 파일 정리
-        try:
-            os.remove(file_path)
-            os.remove(meta_path)
-        except Exception as e:
-            logging.warning(f"⚠️ Failed to clean up temporary files: {e}")
-        
-        # 메모리 정리
-        del embedded_docs
-        gc.collect()
-        
-        # 작업 완료
-        result = {
-            "status": "성공",
-            "original_filename": metadata["original_filename"],
-            "num_sections": len(valid_docs),
-            "total_pages": total_pages
-        }
-        task_manager.complete_task(task_id, result)
-        
-    except Exception as e:
-        error_msg = str(e)
-        logging.error(f"❌ Error processing task {task_id}: {error_msg}")
-        import traceback
-        traceback.print_exc()
-        
-        # 작업 실패 처리
-        task_manager.fail_task(task_id, error_msg)
-        
-        # 실패 시 임시 파일 정리
-        try:
-            file_path = task_manager.get_task_file_path(task_id)
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
-            meta_path = file_path + ".meta.json"
-            if os.path.exists(meta_path):
-                os.remove(meta_path)
-        except:
-            pass
-        
-        # 메모리 정리
-        gc.collect()
