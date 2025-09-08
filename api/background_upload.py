@@ -61,102 +61,54 @@ def get_background_upload_router(document_store, embedder):
         margin_settings: Optional[str] = Form(None),
         overwrite_decisions: Optional[str] = Form(None)
     ):
-        """비동기 파일 업로드 - 즉시 task_id 반환"""
+        """비동기 파일 업로드 - 즉시 응답 반환, 파일 처리는 백그라운드"""
         
         sosok = sosok.strip() if sosok else ""
         site = site.strip() if site else ""
         
         task_ids = []
-        created_tasks = []  # 생성된 작업 정보 저장
+        file_data_list = []  # 파일 데이터를 임시 저장
         
-        # 업로드 디렉토리 확인
-        os.makedirs("./uploads", exist_ok=True)
-        
+        # 파일 검증 및 메모리로 읽기 (빠른 검증만)
         for file in files:
             # 파일 확장자 검증
             ext = os.path.splitext(file.filename.lower())[-1]
             if ext not in [".pdf", ".hwpx", ".docx", ".pptx"]:
                 continue
             
-            # 작업 생성 - 초기 상태는 UPLOADING
-            task_id = task_manager.create_task(file.filename, sosok, site)
+            # 작업 ID 생성 (DB 작업 최소화)
+            task_id = str(uuid.uuid4())
             task_ids.append(task_id)
             
-            # 파일명 정규화
-            normalized_filename = unicodedata.normalize("NFC", file.filename.strip())
-            unique_filename = f"{uuid.uuid4().hex}_{normalized_filename}"
-            file_path = os.path.join("./uploads", unique_filename)
+            # 파일 데이터를 메모리로 읽기 (응답 전에 필요한 유일한 비동기 작업)
+            content = await file.read()
             
-            try:
-                # 파일 저장 진행률 업데이트
-                task_manager.update_task_status(
-                    task_id, 
-                    TaskStatus.UPLOADING,
-                    progress=50,
-                    message="파일 저장 중..."
-                )
-                
-                # 파일 즉시 저장 (동기적으로)
-                content = await file.read()
-                
-                # 파일을 동기적으로 저장
-                with open(file_path, "wb") as f:
-                    f.write(content)
-                
-                # 파일 경로 저장
-                task_manager.set_task_file_path(task_id, file_path)
-                
-                # 메타데이터 파일로 저장
-                meta_path = file_path + ".meta.json"
-                metadata = {
-                    "task_id": task_id,
-                    "file_path": file_path,
-                    "tags": tags,
-                    "sosok": sosok,
-                    "site": site,
-                    "top_margin": top_margin,
-                    "bottom_margin": bottom_margin,
-                    "margin_settings": margin_settings,
-                    "overwrite_decisions": overwrite_decisions,
-                    "original_filename": file.filename
-                }
-                with open(meta_path, "w") as f:
-                    json.dump(metadata, f)
-                
-                # 파일 저장 완료 후 즉시 QUEUED 상태로 변경
-                task_manager.update_task_status(
-                    task_id, 
-                    TaskStatus.QUEUED,
-                    progress=100,
-                    message="처리 대기 중..."
-                )
-                
-                # 처리 큐에 추가 (백그라운드 처리)
-                await task_manager.processing_queue.put(task_id)
-                
-                # 생성된 작업 정보 저장
-                created_task = task_manager.get_task(task_id)
-                if created_task:
-                    created_tasks.append(created_task)
-                
-                logging.info(f"✅ File uploaded and queued: {file.filename} (task_id: {task_id})")
-                
-            except Exception as e:
-                logging.error(f"❌ Error handling file {file.filename}: {e}")
-                # 실패한 작업은 즉시 실패 처리
-                task_manager.fail_task(task_id, str(e))
-                
-                # 실패한 작업도 포함
-                failed_task = task_manager.get_task(task_id)
-                if failed_task:
-                    created_tasks.append(failed_task)
+            # 파일 정보를 메모리에 저장 (디스크 I/O 없음)
+            file_data_list.append({
+                "task_id": task_id,
+                "filename": file.filename,
+                "content": content,
+                "content_type": file.content_type,
+                "tags": tags,
+                "sosok": sosok,
+                "site": site,
+                "top_margin": top_margin,
+                "bottom_margin": bottom_margin,
+                "margin_settings": margin_settings,
+                "overwrite_decisions": overwrite_decisions
+            })
         
-        # 즉시 응답 반환 (생성된 작업 정보 포함)
+        # IMMEDIATE RESPONSE - 파일 처리 전에 응답 반환
+        logging.info(f"📤 Accepting {len(task_ids)} files for background processing")
+        
+        # 백그라운드에서 파일 처리 스케줄링 (응답 후 처리)
+        asyncio.create_task(process_uploaded_files(file_data_list, task_manager))
+        
+        # 즉시 응답 반환 - 파일 처리를 기다리지 않음
         return {
             "status": "accepted",
             "task_ids": task_ids,
-            "tasks": created_tasks,  # 생성된 작업 정보 포함
-            "message": f"{len(task_ids)}개 파일 업로드 완료. 처리 중..."
+            "message": f"{len(task_ids)}개 파일이 접수되었습니다. 처리가 시작됩니다..."
         }
     
     @router.get("/tasks/")
@@ -235,6 +187,85 @@ def get_background_upload_router(document_store, embedder):
             raise HTTPException(status_code=400, detail="Cannot cancel this task")
     
     return router
+
+
+async def process_uploaded_files(file_data_list, task_manager):
+    """응답 후 백그라운드에서 업로드된 파일들을 처리"""
+    import unicodedata
+    
+    # 업로드 디렉토리 확인
+    os.makedirs("./uploads", exist_ok=True)
+    
+    for file_data in file_data_list:
+        task_id = file_data["task_id"]
+        filename = file_data["filename"]
+        content = file_data["content"]
+        
+        try:
+            # 1. 데이터베이스에 작업 등록
+            task_manager.create_task_with_id(task_id, filename, file_data["sosok"], file_data["site"])
+            
+            # 2. 파일명 정규화 및 파일 저장
+            normalized_filename = unicodedata.normalize("NFC", filename.strip())
+            unique_filename = f"{uuid.uuid4().hex}_{normalized_filename}"
+            file_path = os.path.join("./uploads", unique_filename)
+            
+            # 파일 저장 상태로 업데이트
+            task_manager.update_task_status(
+                task_id, 
+                TaskStatus.UPLOADING,
+                progress=50,
+                message="파일 저장 중..."
+            )
+            
+            # 파일을 디스크에 저장
+            with open(file_path, "wb") as f:
+                f.write(content)
+            
+            # 파일 경로 저장
+            task_manager.set_task_file_path(task_id, file_path)
+            
+            # 메타데이터 파일 생성
+            meta_path = file_path + ".meta.json"
+            metadata = {
+                "task_id": task_id,
+                "file_path": file_path,
+                "tags": file_data["tags"],
+                "sosok": file_data["sosok"],
+                "site": file_data["site"],
+                "top_margin": file_data["top_margin"],
+                "bottom_margin": file_data["bottom_margin"],
+                "margin_settings": file_data["margin_settings"],
+                "overwrite_decisions": file_data["overwrite_decisions"],
+                "original_filename": filename
+            }
+            with open(meta_path, "w") as f:
+                json.dump(metadata, f)
+            
+            # 처리 대기 상태로 변경
+            task_manager.update_task_status(
+                task_id, 
+                TaskStatus.QUEUED,
+                progress=100,
+                message="처리 대기 중..."
+            )
+            
+            # 처리 큐에 추가
+            await task_manager.processing_queue.put(task_id)
+            
+            logging.info(f"✅ Background file processing queued: {filename} (task_id: {task_id})")
+            
+            # 메모리에서 파일 콘텐츠 제거
+            del content
+            
+        except Exception as e:
+            logging.error(f"❌ Background processing error for {filename}: {e}")
+            # 실패한 작업 처리
+            try:
+                task_manager.fail_task(task_id, str(e))
+            except:
+                # 작업이 아직 생성되지 않은 경우 무시
+                pass
 
 
 async def process_file_task(task_id: str, document_store, embedder):

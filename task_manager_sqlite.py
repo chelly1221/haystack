@@ -98,6 +98,25 @@ class TaskManager:
         logging.info(f"📋 Created task {task_id} for {filename}")
         return task_id
     
+    def create_task_with_id(self, task_id: str, filename: str, sosok: str, site: str) -> str:
+        """기존 ID로 새 작업 생성 (백그라운드 처리용)"""
+        now = datetime.now()
+        
+        with self._get_db() as conn:
+            conn.execute('''
+                INSERT INTO tasks (
+                    id, filename, sosok, site, status, progress, message,
+                    created_at, updated_at, is_dismissed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                task_id, filename, sosok, site, TaskStatus.UPLOADING.value,
+                0, "백그라운드 처리 시작...", now, now, 0
+            ))
+            conn.commit()
+        
+        logging.info(f"📋 Created background task {task_id} for {filename}")
+        return task_id
+    
     def update_task_status(self, task_id: str, status: TaskStatus, 
                           progress: int = None, message: str = None,
                           total_pages: int = None, processed_pages: int = None):
