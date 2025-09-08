@@ -250,7 +250,10 @@ def get_documents_router(document_store):
         site: Optional[str] = Query(None)
     ):
         try:
+            logging.info(f"🗑 Backend: delete_document called with file_id='{file_id}', filename='{filename}', sosok='{sosok}', site='{site}'")
+            
             if not file_id and not filename:
+                logging.error("🗑 Backend: Both file_id and filename are None/empty")
                 raise HTTPException(status_code=400, detail="file_id or filename must be provided.")
 
             file_id = unicodedata.normalize("NFC", file_id.strip()) if file_id else None
