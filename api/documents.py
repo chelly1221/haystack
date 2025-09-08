@@ -262,6 +262,12 @@ def get_documents_router(document_store):
             ids_to_delete = []
             deleted_file_ids = set()
 
+            logging.info(f"🔍 Searching through {len(docs)} documents for file_id='{file_id}' or filename='{filename}'")
+            
+            for i, doc in enumerate(docs[:5]):  # Log first 5 docs for debugging
+                meta = doc.meta or {}
+                logging.info(f"📄 Doc {i}: file_id='{meta.get('file_id', 'MISSING')}', filename='{meta.get('original_filename', 'MISSING')}'")
+            
             for doc in docs:
                 meta = doc.meta or {}
                 doc_file_id = meta.get("file_id", "").strip()
@@ -272,28 +278,42 @@ def get_documents_router(document_store):
                     continue
 
                 if file_id and doc_file_id == file_id:
+                    logging.info(f"✅ Found matching document by file_id: {file_id}")
                     ids_to_delete.append(doc.id)
                     deleted_file_ids.add(doc_file_id)
                 elif filename and doc_filename == filename:
+                    logging.info(f"✅ Found matching document by filename: {filename}")
                     ids_to_delete.append(doc.id)
                     deleted_file_ids.add(doc_file_id)
 
             if not ids_to_delete:
+                logging.warning(f"🔍 No documents found for deletion. file_id={file_id}, filename={filename}, total_docs={len(docs)}")
                 return {"status": "error", "message": "No documents matched the given identifier or permission denied."}
 
+            logging.info(f"🗑 Deleting {len(ids_to_delete)} documents with file_ids: {list(deleted_file_ids)}")
             document_store.delete_documents(document_ids=ids_to_delete)
 
             upload_dir = "./uploads"
             deleted_files = []
+            all_files = os.listdir(upload_dir)
+            logging.info(f"📂 Files in upload directory: {all_files}")
+            
             for fid in deleted_file_ids:
-                for f in os.listdir(upload_dir):
+                logging.info(f"🔍 Looking for files containing file_id: {fid}")
+                matching_files = []
+                for f in all_files:
                     if fid in f:
-                        try:
-                            os.remove(os.path.join(upload_dir, f))
-                            deleted_files.append(f)
-                            logging.info(f"🗑 Deleted file from disk: {f}")
-                        except Exception as e:
-                            logging.warning(f"⚠ Failed to delete uploaded file {f}: {e}")
+                        matching_files.append(f)
+                
+                logging.info(f"📁 Found {len(matching_files)} matching files: {matching_files}")
+                
+                for f in matching_files:
+                    try:
+                        os.remove(os.path.join(upload_dir, f))
+                        deleted_files.append(f)
+                        logging.info(f"🗑 Deleted file from disk: {f}")
+                    except Exception as e:
+                        logging.warning(f"⚠ Failed to delete uploaded file {f}: {e}")
 
             return {
                 "status": "success",
