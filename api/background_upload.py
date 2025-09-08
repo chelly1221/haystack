@@ -67,9 +67,14 @@ def get_background_upload_router(document_store, embedder):
         site = site.strip() if site else ""
         
         task_ids = []
-        file_metadata_list = []  # 파일 메타데이터만 저장 (파일 내용은 읽지 않음)
+        temp_file_list = []  # 임시 저장된 파일 정보
         
-        # 파일 검증만 수행 (파일 내용은 읽지 않음)
+        # 임시 디렉토리 확인 및 생성
+        temp_dir = "./uploads/temp"
+        os.makedirs(temp_dir, exist_ok=True)
+        os.makedirs("./uploads", exist_ok=True)
+        
+        # Stage 1: 파일을 임시 디렉토리에 즉시 저장
         for file in files:
             # 파일 확장자 검증
             ext = os.path.splitext(file.filename.lower())[-1]
@@ -80,11 +85,21 @@ def get_background_upload_router(document_store, embedder):
             task_id = str(uuid.uuid4())
             task_ids.append(task_id)
             
-            # 파일 메타데이터만 저장 (파일 내용은 백그라운드에서 읽음)
-            file_metadata_list.append({
+            # 파일명 정규화
+            normalized_filename = unicodedata.normalize("NFC", file.filename.strip())
+            temp_filename = f"{task_id}_{normalized_filename}"
+            temp_file_path = os.path.join(temp_dir, temp_filename)
+            
+            # 파일을 임시 디렉토리에 즉시 저장
+            content = await file.read()
+            with open(temp_file_path, "wb") as f:
+                f.write(content)
+            
+            # 임시 파일 정보 저장
+            temp_file_list.append({
                 "task_id": task_id,
                 "filename": file.filename,
-                "file_obj": file,  # 파일 객체 저장 (내용은 아직 읽지 않음)
+                "temp_file_path": temp_file_path,
                 "content_type": file.content_type,
                 "tags": tags,
                 "sosok": sosok,
@@ -94,12 +109,14 @@ def get_background_upload_router(document_store, embedder):
                 "margin_settings": margin_settings,
                 "overwrite_decisions": overwrite_decisions
             })
+            
+            logging.info(f"📁 Saved temp file: {temp_file_path}")
         
-        # IMMEDIATE RESPONSE - 파일 내용을 읽지 않고 즉시 응답
-        logging.info(f"📤 Accepting {len(task_ids)} files for background processing (no file reading)")
+        # IMMEDIATE RESPONSE - 파일이 안전하게 저장된 후 즉시 응답
+        logging.info(f"📤 Saved {len(task_ids)} files to temp, responding immediately")
         
-        # 백그라운드에서 파일 처리 스케줄링 (응답 후 파일 읽기)
-        asyncio.create_task(process_uploaded_files_from_metadata(file_metadata_list, task_manager))
+        # Stage 2: 백그라운드에서 임시 파일로부터 처리
+        asyncio.create_task(process_files_from_temp(temp_file_list, task_manager))
         
         # 즉시 응답 반환 - 파일 처리를 기다리지 않음
         return {
@@ -186,71 +203,66 @@ def get_background_upload_router(document_store, embedder):
     return router
 
 
-async def process_uploaded_files_from_metadata(file_metadata_list, task_manager):
-    """응답 후 백그라운드에서 파일 메타데이터로부터 파일을 처리"""
+async def process_files_from_temp(temp_file_list, task_manager):
+    """Stage 2: 임시 파일들로부터 백그라운드 처리"""
     import unicodedata
     
-    # 업로드 디렉토리 확인
-    os.makedirs("./uploads", exist_ok=True)
-    
-    for file_metadata in file_metadata_list:
-        task_id = file_metadata["task_id"]
-        filename = file_metadata["filename"]
-        file_obj = file_metadata["file_obj"]
+    for temp_file_info in temp_file_list:
+        task_id = temp_file_info["task_id"]
+        filename = temp_file_info["filename"]
+        temp_file_path = temp_file_info["temp_file_path"]
         
         try:
             # 1. 데이터베이스에 작업 등록
-            task_manager.create_task_with_id(task_id, filename, file_metadata["sosok"], file_metadata["site"])
+            task_manager.create_task_with_id(task_id, filename, temp_file_info["sosok"], temp_file_info["site"])
             
-            # 2. 파일 내용을 이제 읽기 (백그라운드에서)
+            # 2. 임시 파일 검증
+            if not os.path.exists(temp_file_path):
+                raise Exception(f"임시 파일을 찾을 수 없습니다: {temp_file_path}")
+            
             task_manager.update_task_status(
                 task_id, 
                 TaskStatus.UPLOADING,
                 progress=25,
-                message="파일 읽기 중..."
+                message="임시 파일 처리 중..."
             )
             
-            # 파일 내용 읽기 (응답 후이므로 블로킹되어도 문제없음)
-            content = await file_obj.read()
-            
-            # 3. 파일명 정규화 및 파일 저장
+            # 3. 최종 파일 경로 생성
             normalized_filename = unicodedata.normalize("NFC", filename.strip())
             unique_filename = f"{uuid.uuid4().hex}_{normalized_filename}"
-            file_path = os.path.join("./uploads", unique_filename)
+            final_file_path = os.path.join("./uploads", unique_filename)
             
-            # 파일 저장 상태로 업데이트
+            # 4. 임시 파일을 최종 위치로 이동
             task_manager.update_task_status(
                 task_id, 
                 TaskStatus.UPLOADING,
                 progress=50,
-                message="파일 저장 중..."
+                message="파일 이동 중..."
             )
             
-            # 파일을 디스크에 저장
-            with open(file_path, "wb") as f:
-                f.write(content)
+            shutil.move(temp_file_path, final_file_path)
             
-            # 파일 경로 저장
-            task_manager.set_task_file_path(task_id, file_path)
+            # 5. 파일 경로 저장
+            task_manager.set_task_file_path(task_id, final_file_path)
             
-            # 메타데이터 파일 생성
-            meta_path = file_path + ".meta.json"
+            # 6. 메타데이터 파일 생성
+            meta_path = final_file_path + ".meta.json"
             metadata = {
                 "task_id": task_id,
-                "file_path": file_path,
-                "tags": file_metadata["tags"],
-                "sosok": file_metadata["sosok"],
-                "site": file_metadata["site"],
-                "top_margin": file_metadata["top_margin"],
-                "bottom_margin": file_metadata["bottom_margin"],
-                "margin_settings": file_metadata["margin_settings"],
-                "overwrite_decisions": file_metadata["overwrite_decisions"],
+                "file_path": final_file_path,
+                "tags": temp_file_info["tags"],
+                "sosok": temp_file_info["sosok"],
+                "site": temp_file_info["site"],
+                "top_margin": temp_file_info["top_margin"],
+                "bottom_margin": temp_file_info["bottom_margin"],
+                "margin_settings": temp_file_info["margin_settings"],
+                "overwrite_decisions": temp_file_info["overwrite_decisions"],
                 "original_filename": filename
             }
             with open(meta_path, "w") as f:
                 json.dump(metadata, f)
             
-            # 처리 대기 상태로 변경
+            # 7. 처리 대기 상태로 변경
             task_manager.update_task_status(
                 task_id, 
                 TaskStatus.QUEUED,
@@ -258,13 +270,10 @@ async def process_uploaded_files_from_metadata(file_metadata_list, task_manager)
                 message="처리 대기 중..."
             )
             
-            # 처리 큐에 추가
+            # 8. 처리 큐에 추가
             await task_manager.processing_queue.put(task_id)
             
-            logging.info(f"✅ Background file processing queued: {filename} (task_id: {task_id})")
-            
-            # 메모리에서 파일 콘텐츠 제거
-            del content
+            logging.info(f"✅ File moved from temp and queued for processing: {filename} (task_id: {task_id})")
             
         except Exception as e:
             logging.error(f"❌ Background processing error for {filename}: {e}")
@@ -272,11 +281,22 @@ async def process_uploaded_files_from_metadata(file_metadata_list, task_manager)
             try:
                 task_manager.fail_task(task_id, str(e))
             except:
-                # 작업이 아직 생성되지 않은 경우 무시
                 pass
+            
+            # 실패 시 임시 파일 정리
+            try:
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                    logging.info(f"🗑️ Cleaned up failed temp file: {temp_file_path}")
+            except Exception as cleanup_error:
+                logging.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {cleanup_error}")
 
 
-# Keep old function for backward compatibility
+# Legacy functions kept for backward compatibility
+async def process_uploaded_files_from_metadata(file_metadata_list, task_manager):
+    """Legacy function - kept for backward compatibility"""
+    pass
+
 async def process_uploaded_files(file_data_list, task_manager):
     """Legacy function - kept for backward compatibility"""
     pass
