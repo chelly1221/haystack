@@ -1,0 +1,16 @@
+[Unit]
+Description=Standalone File Processor Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/mnt/haystack
+ExecStart=/usr/bin/python3 file_processor_service.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

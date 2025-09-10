@@ -1,0 +1,4 @@
+# File Processor Service Dependencies
+watchdog>=3.0.0
+sqlite3  # Built-in to Python
+asyncio  # Built-in to Python

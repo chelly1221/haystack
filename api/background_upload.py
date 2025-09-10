@@ -11,6 +11,43 @@ from task_manager_sqlite import task_manager
 def get_background_upload_router(document_store, embedder):
     router = APIRouter()
     
+    @router.post("/upload-simple/")
+    async def upload_simple(files: List[UploadFile] = File(...)):
+        """Ultra-simple file upload - ONLY saves files, no processing"""
+        
+        # Simple upload directory
+        upload_dir = "./uploads/simple"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        uploaded_files = []
+        
+        for file in files:
+            # Generate unique filename
+            file_id = str(uuid.uuid4())
+            normalized_filename = unicodedata.normalize("NFC", file.filename.strip())
+            simple_filename = f"{file_id}_{normalized_filename}"
+            file_path = os.path.join(upload_dir, simple_filename)
+            
+            # Save file - that's it!
+            content = await file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            
+            uploaded_files.append({
+                "file_id": file_id,
+                "filename": file.filename,
+                "size": len(content)
+            })
+            
+            logging.info(f"📁 Simple upload: {simple_filename}")
+        
+        # Immediate response - no processing
+        return {
+            "status": "uploaded",
+            "files": uploaded_files,
+            "message": f"{len(uploaded_files)}개 파일이 업로드되었습니다."
+        }
+    
     @router.post("/upload-async/")
     async def upload_async(
         files: List[UploadFile] = File(...),

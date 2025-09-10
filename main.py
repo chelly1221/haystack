@@ -12,6 +12,7 @@ from api.query import get_query_router
 from api.documents import get_documents_router
 from api.statistics import get_statistics_router
 from api.background_upload import get_background_upload_router
+from api.processor_tasks import get_processor_task_router
 from api.websocket_handler import router as websocket_router
 
 import os
@@ -67,6 +68,7 @@ app.include_router(get_query_router(document_store, embedder))
 app.include_router(get_documents_router(document_store))
 app.include_router(get_statistics_router(document_store))
 app.include_router(get_background_upload_router(document_store, embedder))
+app.include_router(get_processor_task_router())
 app.include_router(websocket_router)
 
 # Initialize background file processor
