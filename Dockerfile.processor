@@ -22,8 +22,7 @@ RUN pip install \
     python-docx \
     python-pptx \
     PyMuPDF \
-    asyncio \
-    sqlite3
+    transformers
 
 # Copy processor files
 COPY file_processor_service.py /app/
