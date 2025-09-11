@@ -56,6 +56,7 @@ RUN pip install \
     python-pptx \
     haystack-ai==2.11.0 \
     qdrant-haystack \
+    sentence-transformers-haystack \
     "sentence-transformers>=4.46.0" \
     --upgrade safetensors \
     "huggingface_hub>=0.16.4" \
