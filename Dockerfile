@@ -67,6 +67,7 @@ RUN pip install \
     transformers \
     PyMuPDF \
     pdf2image \
-    "psutil>=5.9.0"
+    "psutil>=5.9.0" \
+    "watchdog>=3.0.0"
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]

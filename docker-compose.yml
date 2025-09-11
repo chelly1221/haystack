@@ -47,8 +47,8 @@ services:
       - .:/app
       - ./models:/app/models
       - ./pdfs:/app/pdfs
-      - ./data:/app/data
       - ./uploads:/app/uploads
+      - file_processing_data:/app/data
     env_file:
       - .env
     environment:
@@ -60,3 +60,32 @@ services:
       - vllm-server
     runtime: nvidia
     restart: always
+
+  file-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.processor
+    container_name: file-processor
+    volumes:
+      - ./uploads:/app/uploads
+      - file_processing_data:/app/data
+      - ./util:/app/util
+      - processor_logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    depends_on:
+      - qdrant
+    restart: always
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/data/processor_tasks.db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  file_processing_data:
+    driver: local
+  processor_logs:
+    driver: local

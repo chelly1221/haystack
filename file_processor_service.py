@@ -19,13 +19,15 @@ from enum import Enum
 import uuid
 import unicodedata
 
-# Setup logging
+# Setup logging for Docker environment
+import sys
+log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=getattr(logging, log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/tmp/file_processor.log'),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout),  # Docker logs
+        logging.FileHandler('/app/logs/processor.log'),
     ]
 )
 
