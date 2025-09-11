@@ -2,7 +2,25 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from haystack.components.embedders import SentenceTransformersDocumentEmbedder
+
+# Import embedder with error handling for diagnostics
+try:
+    from haystack.components.embedders import SentenceTransformersDocumentEmbedder
+except ImportError as e:
+    import sys
+    print(f"❌ Failed to import SentenceTransformersDocumentEmbedder: {e}", file=sys.stderr)
+    print(f"🔍 Python version: {sys.version}", file=sys.stderr)
+    try:
+        import haystack
+        print(f"📦 Haystack version: {haystack.__version__}", file=sys.stderr)
+    except:
+        print("❌ Haystack not properly installed", file=sys.stderr)
+    try:
+        import sentence_transformers
+        print(f"📦 Sentence-transformers version: {sentence_transformers.__version__}", file=sys.stderr)
+    except:
+        print("❌ Sentence-transformers not properly installed", file=sys.stderr)
+    raise
 
 from util.pdf import clean_text_by_fixed_margins, split_pdf_by_pages, split_pdf_by_section_headings
 from util.embedding import embed_document_sections, embed_query, cosine_similarity

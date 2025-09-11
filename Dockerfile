@@ -57,6 +57,7 @@ RUN pip install \
     haystack-ai==2.11.0 \
     qdrant-haystack \
     "sentence-transformers>=4.46.0" \
+    "transformers>=4.41.0" \
     --upgrade safetensors \
     "huggingface_hub>=0.16.4" \
     git-lfs \
@@ -64,7 +65,6 @@ RUN pip install \
     requests \
     poppler-utils \
     python-multipart \
-    transformers \
     PyMuPDF \
     pdf2image \
     "psutil>=5.9.0" \
