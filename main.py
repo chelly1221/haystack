@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from haystack_integrations.components.embedders.sentence_transformers import SentenceTransformersDocumentEmbedder
+from haystack.components.embedders import SentenceTransformersDocumentEmbedder
 
 from util.pdf import clean_text_by_fixed_margins, split_pdf_by_pages, split_pdf_by_section_headings
 from util.embedding import embed_document_sections, embed_query, cosine_similarity
