@@ -76,4 +76,7 @@ RUN pip install \
     "psutil>=5.9.0" \
     "watchdog>=3.0.0"
 
+# Create required directories for integrated file processor
+RUN mkdir -p /app/uploads/simple /app/uploads/processed /app/data /app/logs
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]

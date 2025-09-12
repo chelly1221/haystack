@@ -92,8 +92,37 @@ app.include_router(websocket_router)
 # Initialize background file processor
 from background_processor import start_background_processor
 
+# Import file processor components
+from file_processor_service import StandaloneFileProcessor
+import asyncio
+import threading
+
+# Global file processor instance
+file_processor = None
+
 @app.on_event("startup")
 async def startup_event():
     """애플리케이션 시작 시 백그라운드 프로세서 시작"""
+    global file_processor
+    
+    # Start original background processor
     await start_background_processor(document_store, embedder)
-    logging.info("🚀 Application startup complete - background processor running")
+    
+    # Start integrated file processor in background thread
+    def start_file_processor():
+        file_processor = StandaloneFileProcessor()
+        file_processor.start_watching()
+    
+    file_processor_thread = threading.Thread(target=start_file_processor, daemon=True)
+    file_processor_thread.start()
+    
+    logging.info("🚀 Application startup complete - background processor and file processor running")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean shutdown of file processor"""
+    global file_processor
+    if file_processor and hasattr(file_processor, 'observer'):
+        file_processor.observer.stop()
+        file_processor.observer.join()
+    logging.info("🛑 File processor shutdown complete")

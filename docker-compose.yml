@@ -48,44 +48,24 @@ services:
       - ./models:/app/models
       - ./pdfs:/app/pdfs
       - ./uploads:/app/uploads
-      - file_processing_data:/app/data
+      - ./data:/app/data
+      - ./logs:/app/logs
     env_file:
       - .env
     environment:
       - HAYSTACK_ENV=production
       - NVIDIA_VISIBLE_DEVICES=1
-      - VLLM_API_BASE=http://192.168.10.101:8080 
+      - VLLM_API_BASE=http://192.168.10.101:8080
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
     depends_on:
       - qdrant
       - vllm-server
     runtime: nvidia
     restart: always
-
-  file-processor:
-    build:
-      context: .
-      dockerfile: Dockerfile.processor
-    container_name: file-processor
-    volumes:
-      - ./uploads:/app/uploads
-      - file_processing_data:/app/data
-      - ./util:/app/util
-      - processor_logs:/app/logs
-    environment:
-      - PYTHONUNBUFFERED=1
-      - LOG_LEVEL=INFO
-    depends_on:
-      - qdrant
-    restart: always
     healthcheck:
-      test: ["CMD", "test", "-f", "/app/data/processor_tasks.db"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
-
-volumes:
-  file_processing_data:
-    driver: local
-  processor_logs:
-    driver: local
+      start_period: 10s
