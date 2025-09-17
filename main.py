@@ -11,7 +11,6 @@ from api.upload import get_upload_router
 from api.query import get_query_router
 from api.documents import get_documents_router
 from api.statistics import get_statistics_router
-from api.websocket_handler import router as websocket_router
 
 import os
 import logging
@@ -57,4 +56,3 @@ app.include_router(get_upload_router(vector_store, embedder))
 app.include_router(get_query_router(vector_store, embedder))
 app.include_router(get_documents_router(vector_store))
 app.include_router(get_statistics_router(vector_store))
-app.include_router(websocket_router)
