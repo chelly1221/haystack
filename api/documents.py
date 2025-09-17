@@ -48,12 +48,12 @@ def check_document_access(doc_meta, sosok, site):
     
     return True
 
-def get_documents_router(qdrant_client):
+def get_documents_router(vector_store):
     @router.get("/list-documents/")
     async def list_documents(sosok: Optional[str] = Query(None), site: Optional[str] = Query(None)):
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             # Apply enhanced permission filtering
             filtered_docs = []
@@ -110,7 +110,7 @@ def get_documents_router(qdrant_client):
         """Check if files with the same names already exist in the same sosok/site"""
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
             
             # Extract from request body
             filenames = request.filenames
@@ -197,7 +197,7 @@ def get_documents_router(qdrant_client):
             logging.info(f"🏷️ Updating tags for file_id: {file_id} with tags: {tags}")
             
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
             
             # Find all documents with this file_id
             matching_docs = []
@@ -221,7 +221,7 @@ def get_documents_router(qdrant_client):
                 
                 # Delete and re-add the document with updated metadata
                 # Since Haystack doesn't have a direct update_document_meta method
-                document_store.delete_documents(document_ids=[doc.id])
+                vector_store.delete_documents(document_ids=[doc.id])
                 
                 # Create new document with updated metadata
                 new_doc = Document(
@@ -229,7 +229,7 @@ def get_documents_router(qdrant_client):
                     meta=doc.meta,
                     embedding=doc.embedding
                 )
-                document_store.write_documents([new_doc])
+                vector_store.write_documents([new_doc])
                 updated_count += 1
             
             logging.info(f"✅ Updated tags for {updated_count} documents with file_id: {file_id}")
@@ -262,7 +262,7 @@ def get_documents_router(qdrant_client):
             filename = unicodedata.normalize("NFC", filename.strip()) if filename else None
 
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             ids_to_delete = []
             deleted_file_ids = set()
@@ -286,7 +286,7 @@ def get_documents_router(qdrant_client):
             if not ids_to_delete:
                 return {"status": "error", "message": "No documents matched the given identifier or permission denied."}
 
-            document_store.delete_documents(document_ids=ids_to_delete)
+            vector_store.delete_documents(document_ids=ids_to_delete)
 
             upload_dir = "./uploads"
             deleted_files = []
@@ -317,7 +317,7 @@ def get_documents_router(qdrant_client):
     ):
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             # Filter documents by tags and permissions
             matched_file_ids = set()
@@ -378,7 +378,7 @@ def get_documents_router(qdrant_client):
     ):
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             def section_sort_key(title):
                 match = re.match(r'^(\d+(?:\.\d+)*)', title)
@@ -424,7 +424,7 @@ def get_documents_router(qdrant_client):
     async def list_tags(sosok: Optional[str] = Query(None), site: Optional[str] = Query(None)):
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             tag_set = set()
 

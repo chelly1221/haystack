@@ -19,7 +19,7 @@ from util.hwpx import parse_hwpx_content_with_page
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-def get_upload_router(qdrant_client, embedder):
+def get_upload_router(vector_store, embedder):
     router = APIRouter()
 
     @router.post("/upload-pdf/")
@@ -218,7 +218,7 @@ def get_upload_router(qdrant_client, embedder):
 
                 if embedded_docs:
                     logging.info(f"📌 Saving {len(embedded_docs)} embedded documents for: {normalized_filename}")
-                    document_store.write_documents(embedded_docs)
+                    vector_store.write_documents(embedded_docs)
                     
                 else:
                     logging.warning(f"⚠ No valid embedded documents to write for: {normalized_filename}")

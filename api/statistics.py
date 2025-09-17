@@ -104,7 +104,7 @@ def get_uptime_string():
     
     return result.strip()
 
-def get_statistics_router(qdrant_client):
+def get_statistics_router(vector_store):
     
     @router.get("/statistics/")
     async def get_statistics(
@@ -114,7 +114,7 @@ def get_statistics_router(qdrant_client):
         """Get comprehensive statistics for documents"""
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
             
             # Filter by permissions
             filtered_docs = []
@@ -289,7 +289,7 @@ def get_statistics_router(qdrant_client):
         """Get upload statistics by date for chart visualization"""
         try:
             loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
             
             # Filter by permissions
             filtered_docs = []
@@ -539,7 +539,7 @@ def get_statistics_router(qdrant_client):
                 
                 # Vector Store statistics with unique document count
                 loop = asyncio.get_event_loop()
-                all_docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+                all_docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
                 
                 # Count unique documents by file_id
                 unique_doc_ids = set()
@@ -547,9 +547,9 @@ def get_statistics_router(qdrant_client):
                     if doc.meta and doc.meta.get("file_id"):
                         unique_doc_ids.add(doc.meta["file_id"])
                 
-                # Determine vector store type from document_store class name
-                store_type = type(document_store).__name__
-                if 'Qdrant' in store_type:
+                # Determine vector store type from vector_store class name
+                store_type = type(vector_store).__name__
+                if 'Simple' in store_type or 'Qdrant' in store_type:
                     vector_type = 'Qdrant'
                 elif 'FAISS' in store_type:
                     vector_type = 'FAISS'
@@ -572,11 +572,11 @@ def get_statistics_router(qdrant_client):
                 }
                 
                 # Add Qdrant-specific information if available
-                if 'Qdrant' in store_type and hasattr(document_store, 'client'):
+                if 'Simple' in store_type or ('Qdrant' in store_type and hasattr(vector_store, 'client')):
                     try:
                         # Try to get collection info
-                        if hasattr(document_store, 'index'):
-                            vector_store['collection'] = document_store.index
+                        if hasattr(vector_store, 'collection_name'):
+                            vector_store['collection'] = vector_store.collection_name
                     except:
                         pass
                 

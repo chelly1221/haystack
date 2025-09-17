@@ -44,7 +44,7 @@ def check_document_access(doc_meta, sosok, site):
     
     return True
 
-def get_query_router(qdrant_client, embedder):
+def get_query_router(vector_store, embedder):
     @router.get("/query-stream/")
     async def stream_query_answer(
         user_query: str = Query(...),
@@ -71,7 +71,7 @@ def get_query_router(qdrant_client, embedder):
                     doc_names = [d.strip() for d in doc_names[0].split(",") if d.strip()]
 
             loop = asyncio.get_event_loop()
-            all_docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            all_docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
 
             # Filter documents with enhanced permission check
             filtered_docs = []
@@ -192,7 +192,7 @@ def get_query_router(qdrant_client, embedder):
             
             # Get and filter documents
             loop = asyncio.get_event_loop()
-            all_docs = await loop.run_in_executor(None, lambda: document_store.filter_documents(filters={}))
+            all_docs = await loop.run_in_executor(None, lambda: vector_store.filter_documents(filters={}))
             
             # Filter documents with enhanced permission check
             filtered_docs = []
