@@ -224,7 +224,7 @@ def get_documents_router(vector_store):
                 vector_store.delete_documents(document_ids=[doc.id])
                 
                 # Create new document with updated metadata
-                new_doc = Document(
+                new_doc = SimpleDocument(
                     content=doc.content,
                     meta=doc.meta,
                     embedding=doc.embedding
