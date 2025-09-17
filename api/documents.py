@@ -1,7 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, Form
 from typing import List, Optional
 from pydantic import BaseModel
-from haystack import Document
+# Simple document class to replace Haystack Document
+class SimpleDocument:
+    def __init__(self, content: str, meta: dict = None):
+        self.content = content
+        self.meta = meta or {}
+        self.id = meta.get('id') if meta else None
 import logging
 import unicodedata
 from collections import defaultdict
@@ -43,7 +48,7 @@ def check_document_access(doc_meta, sosok, site):
     
     return True
 
-def get_documents_router(document_store):
+def get_documents_router(qdrant_client):
     @router.get("/list-documents/")
     async def list_documents(sosok: Optional[str] = Query(None), site: Optional[str] = Query(None)):
         try:

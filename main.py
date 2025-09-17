@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from haystack.components.embedders import SentenceTransformersDocumentEmbedder
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 
 from util.pdf import clean_text_by_fixed_margins, split_pdf_by_pages, split_pdf_by_section_headings
 from util.embedding import embed_document_sections, embed_query, cosine_similarity
@@ -37,32 +37,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-recreate = not os.path.exists("./qdrant_data/index_created.flag")
-
-document_store = QdrantDocumentStore(
-    url="http://qdrant:6333",
-    index="haystack-index",
-    recreate_index=False,
-    embedding_dim=1024
-)
-
-if recreate:
-    os.makedirs("./qdrant_data", exist_ok=True)
-    with open("./qdrant_data/index_created.flag", "w") as f:
-        f.write("done")
-    time.sleep(1.5)  # ✅ Qdrant가 생성 완료될 시간 확보
+# Initialize Qdrant client
+qdrant_client = QdrantClient(url="http://qdrant:6333")
 
 # Initialize embedder
-embedder = SentenceTransformersDocumentEmbedder(model="./models/KURE-v1")
-embedder.warm_up()
+embedder = SentenceTransformer("./models/KURE-v1")
 
 # Create upload directory if it doesn't exist
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Register routers
-app.include_router(get_upload_router(document_store, embedder))
-app.include_router(get_query_router(document_store, embedder))
-app.include_router(get_documents_router(document_store))
-app.include_router(get_statistics_router(document_store))
+app.include_router(get_upload_router(qdrant_client, embedder))
+app.include_router(get_query_router(qdrant_client, embedder))
+app.include_router(get_documents_router(qdrant_client))
+app.include_router(get_statistics_router(qdrant_client))
 app.include_router(websocket_router)

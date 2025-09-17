@@ -104,7 +104,7 @@ def get_uptime_string():
     
     return result.strip()
 
-def get_statistics_router(document_store):
+def get_statistics_router(qdrant_client):
     
     @router.get("/statistics/")
     async def get_statistics(

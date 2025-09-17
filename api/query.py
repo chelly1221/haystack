@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Query, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
-from haystack import Document
+# Simple document class to replace Haystack Document
+class SimpleDocument:
+    def __init__(self, content: str, meta: dict = None):
+        self.content = content
+        self.meta = meta or {}
+        self.id = meta.get('id') if meta else None
 from util.embedding import embed_query, cosine_similarity
 from llama_server_generator import LlamaServerGenerator
 import asyncio
@@ -39,7 +44,7 @@ def check_document_access(doc_meta, sosok, site):
     
     return True
 
-def get_query_router(document_store, embedder):
+def get_query_router(qdrant_client, embedder):
     @router.get("/query-stream/")
     async def stream_query_answer(
         user_query: str = Query(...),

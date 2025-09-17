@@ -1,6 +1,11 @@
 from fastapi import APIRouter, UploadFile, File, Form
 from typing import List, Optional
-from haystack import Document
+# Simple document class to replace Haystack Document
+class SimpleDocument:
+    def __init__(self, content: str, meta: dict = None):
+        self.content = content
+        self.meta = meta or {}
+        self.id = meta.get('id') if meta else None
 import os, shutil, uuid, unicodedata, logging, gc
 import pdfplumber
 import asyncio, re
@@ -14,7 +19,7 @@ from util.hwpx import parse_hwpx_content_with_page
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-def get_upload_router(document_store, embedder):
+def get_upload_router(qdrant_client, embedder):
     router = APIRouter()
 
     @router.post("/upload-pdf/")

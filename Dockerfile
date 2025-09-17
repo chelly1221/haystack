@@ -48,15 +48,18 @@ RUN pip install \
     "msgspec>=0.18.5" \
     "aiohttp>=3.9.0"
 
+# Install sentence-transformers and transformers first (critical dependencies)
+RUN pip install \
+    "transformers>=4.41.0" \
+    "sentence-transformers>=4.46.0"
+
 # Install other required packages
 RUN pip install \
     scipy \
     pdfplumber \
     python-docx \
     python-pptx \
-    haystack-ai==2.11.0 \
-    qdrant-haystack \
-    "sentence-transformers>=4.46.0" \
+    qdrant-client \
     --upgrade safetensors \
     "huggingface_hub>=0.16.4" \
     git-lfs \
@@ -64,7 +67,6 @@ RUN pip install \
     requests \
     poppler-utils \
     python-multipart \
-    "transformers>=4.41.0" \
     PyMuPDF \
     pdf2image \
     "psutil>=5.9.0"
