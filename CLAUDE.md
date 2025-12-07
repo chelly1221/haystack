@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a document processing and RAG (Retrieval-Augmented Generation) system built with FastAPI and vLLM. The system processes various document formats (PDF, DOCX, PPTX, HWPX) and provides semantic search and AI-powered question-answering capabilities using Korean language models.
+This is a document processing and RAG (Retrieval-Augmented Generation) system built with FastAPI and vLLM. The system processes various document formats (PDF, DOCX, PPTX, HWPX) and provides semantic search and AI-powered question-answering capabilities using Korean language models. Updated for improved performance.
 
 ## Core Architecture
 
