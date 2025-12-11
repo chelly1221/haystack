@@ -61,7 +61,7 @@ RUN pip install \
     python-pptx \
     qdrant-client \
     --upgrade safetensors \
-    "huggingface_hub>=0.16.4" \
+    "huggingface_hub>=0.16.4,<1.0" \
     git-lfs \
     python-dotenv \
     requests \
